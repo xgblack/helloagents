@@ -317,11 +317,22 @@ function setCodexPluginEnabled(configPath, enable) {
   const managedHeader = `${header} ${MANAGED_PLUGIN_SUFFIX}`
   const text = readText(configPath) ?? ''
   const lines = text === '' ? [] : text.split(/\r?\n/)
-  const kept = lines.filter((line) => {
+  const kept = []
+  let inTargetSection = false
+  for (const line of lines) {
     const trimmed = line.trim()
-    return trimmed !== header && trimmed !== managedHeader && !trimmed.startsWith(`${header} `)
-  })
-  if (enable) kept.push(managedHeader)
+    const isTargetHeader =
+      trimmed === header || trimmed === managedHeader || trimmed.startsWith(`${header} `)
+    if (isTargetHeader) {
+      inTargetSection = true
+      continue
+    }
+    if (inTargetSection && /^\[\[?.+\]\]?\s*(?:#.*)?$/.test(trimmed)) {
+      inTargetSection = false
+    }
+    if (!inTargetSection) kept.push(line)
+  }
+  if (enable) kept.push(managedHeader, `enabled = true ${MANAGED_PLUGIN_SUFFIX}`)
   const body = kept.join('\n').replace(/\n+$/, '')
   if (body) writeTextAtomic(configPath, `${body}\n`)
   else if (fileExists(configPath)) removePath(configPath)
@@ -340,14 +351,17 @@ export function installCodexPlugin(home, appDirPath) {
   if (!fileExists(manifestPath)) writePluginManifest(manifestPath, meta)
 
   ensureCodexMarketplaceEntry(home, meta)
-  setCodexPluginEnabled(codexConfigPath(home), true)
 
   if (process.env.HELLOAGENTS_HOME) {
+    // 测试隔离或自定义目录下不能让原生 Codex 命令改写真实用户配置。
+    setCodexPluginEnabled(codexConfigPath(home), true)
     return { ok: true, manualSteps: `codex plugin add ${CODEX_PLUGIN_ID}` }
   }
 
   const probe = runHostCommand('codex', ['plugin', 'list'])
   if (probe.missing) {
+    // Codex 不在 PATH 时保留离线兜底；完整替换 section，避免留下孤立表体。
+    setCodexPluginEnabled(codexConfigPath(home), true)
     return { ok: true, manualSteps: `codex plugin add ${CODEX_PLUGIN_ID}` }
   }
 

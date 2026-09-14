@@ -17,3 +17,6 @@ _to_delete/
 *.p12
 *.pfx
 .claude/settings.local.json
+
+AGENTS.md
+.idea

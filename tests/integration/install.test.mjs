@@ -43,6 +43,15 @@ function host(id) {
   return found
 }
 
+/** @param {string} text @param {string} header */
+function tomlSection(text, header) {
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((line) => line.trim().startsWith(header))
+  if (start < 0) return ''
+  const end = lines.findIndex((line, index) => index > start && /^\s*\[/.test(line))
+  return lines.slice(start, end < 0 ? undefined : end).join('\n').trim()
+}
+
 test('标准模式安装：载体写入内核，安装状态记录，重复安装幂等', () => {
   const { home, cleanup } = makeFakeHome()
   try {
@@ -157,10 +166,17 @@ test('update 刷新载体版本与运行副本', () => {
   }
 })
 
-test('codex 全局模式：写入插件快照、市场索引与 config 启用项', () => {
+test('codex 全局模式：重复安装不会把 enabled 留在错误的 TOML section', () => {
   const { home, cleanup } = makeFakeHome()
   try {
     const { ctx } = makeCtx(home)
+    const configPath = join(home, '.codex', 'config.toml')
+    writeTextAtomic(
+      configPath,
+      '[plugins."existing@test"]\nenabled = true\n\n[plugins."helloagents@local-plugins"]\nenabled = true\n',
+    )
+
+    runInstall(ctx, [host('codex')], 'global')
     runInstall(ctx, [host('codex')], 'global')
 
     const pluginDir = join(home, 'plugins', 'helloagents')
@@ -172,8 +188,16 @@ test('codex 全局模式：写入插件快照、市场索引与 config 启用项
     )
     assert.ok(marketplace?.plugins?.some((entry) => entry.name === 'helloagents'))
 
-    const config = readText(join(home, '.codex', 'config.toml')) ?? ''
-    assert.ok(config.includes('[plugins."helloagents@local-plugins"]'))
+    const config = readText(configPath) ?? ''
+    assert.equal(
+      tomlSection(config, '[plugins."existing@test"]'),
+      '[plugins."existing@test"]\nenabled = true',
+    )
+    assert.equal(
+      tomlSection(config, '[plugins."helloagents@local-plugins"]'),
+      '[plugins."helloagents@local-plugins"] # helloagents-managed\nenabled = true # helloagents-managed',
+    )
+    assert.equal(config.match(/^enabled = true(?:\s|$)/gm)?.length, 2)
 
     // 内核仍写入标准载体（可叠加）。
     const carrier = host('codex').carrierPath(home) ?? ''
@@ -186,9 +210,11 @@ test('codex 全局模式：写入插件快照、市场索引与 config 启用项
 
     runUninstall(ctx, [host('codex')], { all: false, purge: false })
     assert.equal(fileExists(pluginDir), false)
-    const afterConfig = readText(join(home, '.codex', 'config.toml')) ?? ''
+    const afterConfig = readText(configPath) ?? ''
     assert.equal(afterConfig.includes('helloagents@local-plugins'), false)
     assert.equal(afterConfig.includes('helloagents-managed'), false, '卸载后不应残留受管标记')
+    assert.match(afterConfig, /\[plugins\."existing@test"\]\nenabled = true/)
+    assert.equal(afterConfig.match(/^enabled = true(?:\s|$)/gm)?.length, 1)
     assert.equal(afterConfig.includes('model_instructions_file'), false)
     assert.equal(fileExists(join(home, '.codex', 'hooks.json')), false)
   } finally {
