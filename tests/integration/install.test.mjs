@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { join } from 'node:path'
-import { fileExists, readJson, readText, writeTextAtomic } from '../../src/kernel/fsx.mjs'
+import { ensureDir, fileExists, readJson, readText, writeTextAtomic } from '../../src/kernel/fsx.mjs'
 import { hasMarkedBlock, readMarkedVersion } from '../../src/kernel/ownership.mjs'
 import { findHost } from '../../src/hosts/registry.mjs'
 import { runInstall, runUninstall, runUpdate } from '../../src/cli/install.mjs'
 import { HOSTS } from '../../src/hosts/registry.mjs'
-import { PACKAGE_VERSION, REPO_ROOT, makeCtx, makeFakeHome } from '../helpers/env.mjs'
+import { PACKAGE_VERSION, REPO_ROOT, makeCtx, makeFakeHome, makeFakeOmp } from '../helpers/env.mjs'
 import { execFileSync } from 'node:child_process'
 import { readInstallState, writeInstallState } from '../../src/kernel/config.mjs'
+import { resolveOmpContextPath, resolveOmpPluginRoot } from '../../src/hosts/omp-config.mjs'
 
 test('Git 来源更新保留脏工作区，不重置本地修改', () => {
   const { home, cleanup } = makeFakeHome()
@@ -446,4 +447,91 @@ test('dsh 模式切换：global → standard 移除插件快照与补丁行', ()
   } finally {
     cleanup()
   }
+})
+
+test('omp 默认安装：原生插件链接到唯一运行副本，update 刷新链接，卸载移除插件', () => {
+  const { home, cleanup } = makeFakeHome()
+  const omp = makeFakeOmp()
+  const previous = process.env.OMP_EXECUTABLE
+  process.env.OMP_EXECUTABLE = omp.executable
+  try {
+    const { ctx } = makeCtx(home)
+    runInstall(ctx, [host('omp')], null)
+
+    const pluginRoot = resolveOmpPluginRoot(home, 'user')
+    const linked = join(pluginRoot, 'node_modules', 'helloagents')
+    assert.ok(fileExists(linked), 'OMP 原生插件应被发现')
+    assert.equal(readText(join(linked, 'package.json')), readText(join(home, '.helloagents', 'app', 'package.json')))
+    assert.equal(fileExists(resolveOmpContextPath(home, 'user')), false, '默认插件模式不应写 AGENTS.md')
+
+    const state = /** @type {{ hosts?: Record<string, { integration?: string, scope?: string }> } | null} */ (
+      readJson(join(home, '.helloagents', 'install.json'))
+    )
+    assert.equal(state?.hosts?.omp?.integration, 'native-plugin')
+    assert.equal(state?.hosts?.omp?.scope, 'user')
+
+    runUpdate(ctx, [host('omp')])
+    assert.ok(fileExists(join(linked, 'omp', 'index.js')), 'update 后插件仍指向运行副本')
+
+    runUninstall(ctx, [host('omp')], { all: false, purge: false })
+    assert.equal(fileExists(linked), false)
+  } finally {
+    if (previous === undefined) delete process.env.OMP_EXECUTABLE
+    else process.env.OMP_EXECUTABLE = previous
+    omp.cleanup()
+    cleanup()
+  }
+})
+
+test('omp scope 与标准模式：project 原生插件明确拒绝，standard 写项目上下文文件', () => {
+  const { home, cleanup } = makeFakeHome()
+  const omp = makeFakeOmp()
+  const previous = process.env.OMP_EXECUTABLE
+  const previousCwd = process.cwd()
+  process.env.OMP_EXECUTABLE = omp.executable
+  const project = join(home, 'project')
+  try {
+    const { ctx } = makeCtx(home)
+    // OMP's real plugin link command has no project scope; fail before invoking it.
+    ensureDir(project)
+    process.chdir(project)
+    assert.throws(
+      () => runInstall(ctx, [host('omp')], null, 'project'),
+      /原生插件链接目前只支持 user scope/,
+    )
+    const projectLink = join(project, '.omp', 'plugins', 'node_modules', 'helloagents')
+    assert.equal(fileExists(projectLink), false)
+    assert.equal(fileExists(join(project, '.omp', 'AGENTS.md')), false)
+
+    runInstall(ctx, [host('omp')], 'standard', 'project')
+    assert.equal(fileExists(projectLink), false, '切到标准模式应卸载 project 插件')
+    assert.ok(hasMarkedBlock(join(project, '.omp', 'AGENTS.md')))
+    const state = /** @type {{ hosts?: Record<string, { integration?: string }> } | null} */ (
+      readJson(join(home, '.helloagents', 'install.json'))
+    )
+    assert.equal(state?.hosts?.omp?.integration, 'context-file')
+
+    runUninstall(ctx, [host('omp')], { all: false, purge: false })
+    assert.equal(hasMarkedBlock(join(project, '.omp', 'AGENTS.md')), false)
+  } finally {
+    process.chdir(previousCwd)
+    if (previous === undefined) delete process.env.OMP_EXECUTABLE
+    else process.env.OMP_EXECUTABLE = previous
+    omp.cleanup()
+    cleanup()
+  }
+})
+
+test('omp 旧状态兼容：mode=standard 按 context-file 卸载', () => {
+  const { home, cleanup } = makeFakeHome()
+  try {
+    const { ctx } = makeCtx(home)
+    const context = resolveOmpContextPath(home, 'user')
+    writeTextAtomic(context, '<!-- HELLOAGENTS_START -->\nold\n<!-- HELLOAGENTS_END -->\n')
+    const state = readInstallState(home)
+    state.hosts.omp = { mode: 'standard', version: '3.9.9', updatedAt: '' }
+    writeInstallState(home, state)
+    runUninstall(ctx, [host('omp')], { all: false, purge: false })
+    assert.equal(fileExists(context), false)
+  } finally { cleanup() }
 })

@@ -29,6 +29,7 @@ import { spawnSync } from 'node:child_process'
 const KNOWN_FLAGS = new Set([
   '--all', '--inject', '--plugin', '--standard', '--global',
   '--json', '--purge', '--check',
+  '--scope',
 ])
 
 /**
@@ -40,11 +41,17 @@ function parseArgs(argv) {
   /** @type {string[]} */
   const positionals = []
   let lang = ''
+  let scope = 'user'
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index] ?? ''
     if (value === '--lang') {
       lang = argv[index + 1] ?? ''
       index += 1
+    } else if (value === '--scope') {
+      scope = argv[index + 1] ?? ''
+      index += 1
+    } else if (value.startsWith('--scope=')) {
+      scope = value.slice('--scope='.length)
     } else if (KNOWN_FLAGS.has(value)) {
       flags.add(value)
     } else if (value.startsWith('--')) {
@@ -53,7 +60,7 @@ function parseArgs(argv) {
       positionals.push(value)
     }
   }
-  return { flags, positionals, lang }
+  return { flags, positionals, lang, scope }
 }
 
 /**
@@ -146,7 +153,7 @@ function runAddonCommand(ctx, addon, positionals) {
  * @returns {number} 进程退出码
  */
 export function runCli(argv) {
-  const { flags, positionals, lang } = parseArgs(argv)
+  const { flags, positionals, lang, scope } = parseArgs(argv)
   const home = userHome()
   const root = packageRoot()
   const pkg = /** @type {{ version?: string } | null} */ (readJson(join(root, 'package.json')))
@@ -186,7 +193,8 @@ export function runCli(argv) {
         }
         const mode = (flags.has('--inject') || flags.has('--standard')) ? 'standard'
           : (flags.has('--plugin') || flags.has('--global')) ? 'global' : null
-        runInstall(ctx, resolveTargets(ctx, rest, flags.has('--all')), mode)
+        if (scope !== 'user' && scope !== 'project') throw new Error(`Invalid --scope: ${scope}`)
+        runInstall(ctx, resolveTargets(ctx, rest, flags.has('--all')), mode, scope)
         return 0
       }
       case 'uninstall': {

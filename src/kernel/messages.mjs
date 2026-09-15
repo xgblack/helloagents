@@ -49,6 +49,26 @@ export const MESSAGES = {
     cn: '{host}：全局模式安装未成功，已改用标准模式。',
     en: '{host}: global mode install failed; fell back to the standard mode.',
   },
+  'install.omp.done': {
+    cn: '{host}：OMP 原生插件已安装（{scope} scope）。',
+    en: '{host}: OMP native plugin installed ({scope} scope).',
+  },
+  'install.omp.standard.done': {
+    cn: '{host}：内核已写入 OMP 上下文文件 {path}。',
+    en: '{host}: kernel written to OMP context file {path}.',
+  },
+  'install.omp.failed': {
+    cn: 'OMP 插件安装失败：{message}',
+    en: 'OMP plugin installation failed: {message}',
+  },
+  'install.omp.projectPluginUnsupported': {
+    cn: 'OMP 的原生插件链接目前只支持 user scope；project scope 请使用 --standard（写入当前项目的 .omp/AGENTS.md）。',
+    en: 'OMP native plugin linking currently supports only the user scope; use --standard for project scope (writes .omp/AGENTS.md in the current project).',
+  },
+  'install.omp.unavailable': {
+    cn: 'OMP 不可用：{message}',
+    en: 'OMP is unavailable: {message}',
+  },
   'install.codexExtrasFailed': {
     cn: 'Codex 标准模式增强配置写入失败（非致命）：{message}',
     en: 'Codex standard mode extras failed (non-fatal): {message}',

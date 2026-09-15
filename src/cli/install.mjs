@@ -15,6 +15,13 @@ import { ensureDir, fileExists, readJson, readText, removePath, writeJsonAtomic,
 import { appDir, helloagentsRoot, toPosix, userConfigPath } from '../kernel/paths.mjs'
 import { injectKernel, readKernelText, removeKernel } from '../hosts/carriers.mjs'
 import { resolveDshHome } from '../hosts/registry.mjs'
+import {
+  OMP_MIN_VERSION,
+  ompDiagnostic,
+  installOmpPlugin,
+  resolveOmpContextPath,
+  uninstallOmpPlugin,
+} from '../hosts/omp-config.mjs'
 import { backupCodexConfig, removeCodexBackups } from '../hosts/codex-backup.mjs'
 import { installCodexManagedConfig, uninstallCodexManagedConfig } from '../hosts/codex-config.mjs'
 import { installCodexHooks, uninstallCodexHooks } from '../hosts/codex-hooks.mjs'
@@ -43,6 +50,7 @@ import { removeApp, syncApp } from './runtime-app.mjs'
 /** @typedef {import('../hosts/registry.mjs').HostAdapter} HostAdapter */
 /** @typedef {import('./main.mjs').CliContext} CliContext */
 /** @typedef {import('../kernel/config.mjs').InstallSource} InstallSource */
+/** @typedef {{ok: boolean, reason?: string, manualSteps?: string}} PluginOperationResult */
 
 // ── 工具函数 ────────────────────────────────────────────────────────────
 
@@ -206,6 +214,7 @@ function uninstallHostHooks(ctx, host) {
  * @param {string} kernel
  */
 function installHostStandard(ctx, host, kernel) {
+  if (host.id === 'omp') return
   // 1. 载体文件注入（Cursor 无全局规则文件，仅安装钩子与软链接）
   const carrier = host.carrierPath(ctx.home)
   if (carrier) {
@@ -249,6 +258,7 @@ function installHostStandard(ctx, host, kernel) {
 
 /** @param {CliContext} ctx @param {HostAdapter} host */
 function uninstallHostStandard(ctx, host) {
+  if (host.id === 'omp') return
   // 载体文件
   const carrier = host.carrierPath(ctx.home)
   if (carrier) removeKernel(carrier)
@@ -280,25 +290,27 @@ function uninstallHostStandard(ctx, host) {
 
 // ── 全局模式插件 ────────────────────────────────────────────────────────
 
-/** @param {CliContext} ctx @param {HostAdapter} host */
-function installHostPlugin(ctx, host) {
+/** @param {CliContext} ctx @param {HostAdapter} host @param {'user' | 'project'} [scope] @returns {PluginOperationResult} */
+function installHostPlugin(ctx, host, scope = 'user') {
   if (host.id === 'claude') return installClaudePlugin(ctx.home, ctx.app)
   if (host.id === 'cursor') return installCursorPlugin(ctx.home, ctx.app)
   if (host.id === 'codex') return installCodexPlugin(ctx.home, ctx.app)
   if (host.id === 'grok') return installGrokPlugin(ctx.home, ctx.app)
   if (host.id === 'hermes') return installHermesPlugin(ctx.home, ctx.app)
   if (host.id === 'dsh') return installDshPlugin(ctx.home, ctx.app)
+  if (host.id === 'omp') return installOmpPlugin(ctx.home, ctx.app, scope, process.cwd())
   return { ok: false }
 }
 
-/** @param {CliContext} ctx @param {HostAdapter} host */
-function uninstallHostPlugin(ctx, host) {
+/** @param {CliContext} ctx @param {HostAdapter} host @param {'user' | 'project'} [scope] @returns {PluginOperationResult} */
+function uninstallHostPlugin(ctx, host, scope = 'user') {
   if (host.id === 'claude') return uninstallClaudePlugin(ctx.home)
   if (host.id === 'cursor') return uninstallCursorPlugin(ctx.home)
   if (host.id === 'codex') return uninstallCodexPlugin(ctx.home)
   if (host.id === 'grok') return uninstallGrokPlugin(ctx.home)
   if (host.id === 'hermes') return uninstallHermesPlugin(ctx.home)
   if (host.id === 'dsh') return uninstallDshPlugin(ctx.home)
+  if (host.id === 'omp') return uninstallOmpPlugin(ctx.home, scope, process.cwd())
   return { ok: true }
 }
 
@@ -328,8 +340,11 @@ function ensureUserConfig(home) {
 
 // ── 主流程 ──────────────────────────────────────────────────────────────
 
-/** @param {CliContext} ctx @param {HostAdapter[]} targets @param {'standard' | 'global' | null} requestedMode */
-export function runInstall(ctx, targets, requestedMode) {
+/** @param {CliContext} ctx @param {HostAdapter[]} targets @param {'standard' | 'global' | null} requestedMode @param {'user' | 'project'} [scope] */
+export function runInstall(ctx, targets, requestedMode, scope = 'user') {
+  if (scope === 'project' && requestedMode !== 'standard' && targets.some((host) => host.id === 'omp')) {
+    throw new Error(ctx.t('install.omp.projectPluginUnsupported'))
+  }
   const version = syncApp(ctx.packageRoot, ctx.app)
   ctx.log(ctx.t('app.synced', { path: ctx.app, version: version ?? ctx.version }))
   const kernel = readKernelText(ctx.app)
@@ -344,6 +359,42 @@ export function runInstall(ctx, targets, requestedMode) {
   let installedCount = 0
 
   for (const host of targets) {
+    // OMP 的原生插件与上下文文件是互斥的两种集成方式；不叠加标准层。
+    if (host.id === 'omp') {
+      const desiredIntegration = requestedMode === 'standard' ? 'context-file' : 'native-plugin'
+      if (desiredIntegration === 'native-plugin' && scope === 'project') {
+        throw new Error(ctx.t('install.omp.projectPluginUnsupported'))
+      }
+      const diagnostic = ompDiagnostic(ctx.home, process.cwd())
+      if (!diagnostic.executable) throw new Error(ctx.t('install.omp.unavailable', { message: 'omp executable not found' }))
+      if (!diagnostic.supported) throw new Error(ctx.t('install.omp.unavailable', { message: `version ${diagnostic.version || 'unknown'} is older than ${OMP_MIN_VERSION}` }))
+      const prior = state.hosts[host.id]
+      const priorIntegration = prior?.integration ?? (prior?.mode === 'standard' ? 'context-file' : 'native-plugin')
+      const priorScope = prior?.scope ?? 'user'
+      if (prior && (priorIntegration !== desiredIntegration || priorScope !== scope)) {
+        if (priorIntegration === 'native-plugin') uninstallHostPlugin(ctx, host, priorScope)
+        else removeKernel(resolveOmpContextPath(ctx.home, priorScope, process.cwd()))
+        ctx.log(ctx.t('install.switched', { host: host.label, from: `${priorIntegration}/${priorScope}`, to: `${desiredIntegration}/${scope}` }))
+      }
+      if (desiredIntegration === 'native-plugin') {
+        const result = installHostPlugin(ctx, host, scope)
+        if (!result.ok) throw new Error(ctx.t('install.omp.failed', { message: result.reason || 'unknown error' }))
+        ctx.log(ctx.t('install.omp.done', { host: host.label, scope }))
+      } else {
+        const contextPath = resolveOmpContextPath(ctx.home, scope, process.cwd())
+        injectKernel(contextPath, kernel, ctx.version)
+        ctx.log(ctx.t('install.omp.standard.done', { host: host.label, path: contextPath }))
+      }
+      state.hosts[host.id] = {
+        mode: requestedMode === 'standard' ? 'standard' : 'global',
+        integration: desiredIntegration,
+        scope,
+        version: ctx.version,
+        updatedAt: new Date().toISOString(),
+      }
+      installedCount += 1
+      continue
+    }
     const desired = requestedMode ?? (host.capabilities.global ? 'global' : 'standard')
     if (!host.capabilities[desired]) {
       const supported = ['standard', 'global'].filter(
@@ -407,10 +458,17 @@ export function runUninstall(ctx, targets, options) {
     state.addons.guard = state.addons.guard.filter((id) => id !== host.id)
     state.addons.notify = state.addons.notify.filter((id) => id !== host.id)
 
-    uninstallHostStandard(ctx, host)
-
-    if (state.hosts[host.id]?.mode === 'global' || host.capabilities.global) {
-      uninstallHostPlugin(ctx, host)
+    if (host.id === 'omp') {
+      const entry = state.hosts[host.id]
+      const integration = entry?.integration ?? (entry?.mode === 'standard' ? 'context-file' : 'native-plugin')
+      const scope = entry?.scope ?? 'user'
+      if (integration === 'native-plugin') uninstallHostPlugin(ctx, host, scope)
+      else removeKernel(resolveOmpContextPath(ctx.home, scope, process.cwd()))
+    } else {
+      uninstallHostStandard(ctx, host)
+      if (state.hosts[host.id]?.mode === 'global' || host.capabilities.global) {
+        uninstallHostPlugin(ctx, host)
+      }
     }
     delete state.hosts[host.id]
     ctx.log(ctx.t('uninstall.host.done', { host: host.label }))
@@ -456,6 +514,22 @@ export function runUpdate(ctx, allHosts) {
   if (!kernel) throw new Error(ctx.t('install.kernelMissing', { path: join(ctx.app, 'prompts', 'kernel.md') }))
 
   for (const host of installed) {
+    if (host.id === 'omp') {
+      const entry = state.hosts[host.id]
+      const integration = entry?.integration ?? (entry?.mode === 'standard' ? 'context-file' : 'native-plugin')
+      const scope = entry?.scope ?? 'user'
+      if (integration === 'native-plugin') {
+        const result = installHostPlugin(ctx, host, scope)
+        if (!result.ok) throw new Error(ctx.t('install.omp.failed', { message: result.reason || 'unknown error' }))
+      } else {
+        injectKernel(resolveOmpContextPath(ctx.home, scope, process.cwd()), kernel, ctx.version)
+      }
+      if (entry) {
+        entry.version = ctx.version
+        entry.updatedAt = new Date().toISOString()
+      }
+      continue
+    }
     // 更新载体文件
     const carrier = host.carrierPath(ctx.home)
     if (carrier) injectKernel(carrier, kernel, ctx.version)

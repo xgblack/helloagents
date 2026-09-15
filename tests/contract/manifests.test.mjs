@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import { readJson } from '../../src/kernel/fsx.mjs'
 import { MANIFEST_FILES } from '../../src/cli/sync-version.mjs'
 import { PACKAGE_VERSION, REPO_ROOT } from '../helpers/env.mjs'
@@ -28,6 +29,14 @@ test('package.json 保持零依赖', () => {
   )
   assert.equal(pkg.dependencies, undefined)
   assert.equal(pkg.devDependencies, undefined)
+})
+
+test('package.json 配置 Nexus npm 私服发布', () => {
+  const pkg = /** @type {{ publishConfig?: { registry?: string }, scripts?: Record<string, string> }} */ (
+    readJson(join(REPO_ROOT, 'package.json'))
+  )
+  assert.equal(pkg.publishConfig?.registry, 'https://nexus.xgblack.cn/repository/npm-repo/')
+  assert.equal(pkg.scripts?.['publish:private'], 'npm publish --ignore-scripts')
 })
 
 test('dsh bundle 清单完整：manifest、补丁与插件入口齐备', () => {
@@ -79,4 +88,48 @@ test('dsh 插件入口：导出 name/inject/apply，frontmatter 解析覆盖全�
   }
   const names = skills.map((skill) => skill.name ?? '')
   assert.equal(new Set(names).size, expected, '技能名不应重复')
+})
+
+test('omp 插件清单：声明 omp.extensions，入口与运行副本内容可打包', async () => {
+  const pkg = /** @type {{ files?: string[], exports?: Record<string, string>, omp?: { extensions?: string[] } }} */ (
+    readJson(join(REPO_ROOT, 'package.json'))
+  )
+  assert.deepEqual(pkg.omp?.extensions, ['./omp/index.js'])
+  assert.equal(pkg.exports?.['./omp'], './omp/index.js')
+  assert.ok(pkg.files?.includes('omp/'))
+  assert.ok(existsSync(join(REPO_ROOT, 'omp', 'index.js')))
+
+  const raw = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout: 60000,
+  })
+  const result = /** @type {Array<{ files?: Array<{ path?: string }> }> } */ (JSON.parse(raw))
+  const files = result[0]?.files ?? []
+  assert.ok(files.some((entry) => entry.path === 'omp/index.js'), 'npm 包必须包含 OMP 插件入口')
+})
+
+test('omp 插件入口：注入内核、发现全部技能并转换兼容路由', async () => {
+  const module = await import(pathToFileURL(join(REPO_ROOT, 'omp', 'index.js')).href)
+  const names = module.skillNames()
+  assert.equal(names.length, 23)
+  assert.ok(names.includes('hello-plan'))
+  assert.equal(module.routeInput('~plan', names), '/skill:hello-plan')
+  assert.equal(module.routeInput('~hello-plan 参数', names), '/skill:hello-plan 参数')
+  assert.equal(module.routeInput('/hello-plan', names), '/skill:hello-plan')
+  assert.equal(module.routeInput('/skill:hello-plan', names), undefined)
+  assert.equal(module.routeInput('/plan', names), undefined, 'OMP 原生 /plan 不应被接管')
+
+  /** @type {Record<string, (event: any) => any>} */
+  const handlers = {}
+  /** @type {{ on: (event: string, handler: (event: any) => any) => void }} */
+  const pi = { on: (event, handler) => { handlers[event] = handler } }
+  module.default(pi)
+  assert.equal(typeof handlers.before_agent_start, 'function')
+  assert.equal(typeof handlers.input, 'function')
+  const start = handlers.before_agent_start?.({ systemPrompt: ['base'] })
+  assert.equal(start.systemPrompt[0], 'base')
+  assert.ok(start.systemPrompt.at(-1).includes('HelloAGENTS'))
+  assert.deepEqual(handlers.input?.({ text: '~qa' }), { text: '/skill:hello-qa' })
+  assert.equal(handlers.input?.({ text: '/plan' }), undefined)
 })

@@ -24,6 +24,7 @@ import {
   dshSkillsDir,
 } from '../hosts/dsh-config.mjs'
 import { HOSTS, findHost, resolveDshHome } from '../hosts/registry.mjs'
+import { ompDiagnostic, ompPluginInstalled, resolveOmpContextPath } from '../hosts/omp-config.mjs'
 import { carrierStatus } from '../hosts/carriers.mjs'
 import { addonPresent, enabledAddons } from './addons.mjs'
 import { appVersion } from './runtime-app.mjs'
@@ -75,6 +76,34 @@ export function buildDoctorReport(ctx) {
   for (const [hostId, install] of Object.entries(state.hosts)) {
     const host = findHost(hostId)
     if (!host) continue
+
+    const ompIntegration = host.id === 'omp'
+      ? (install.integration ?? (install.mode === 'standard' ? 'context-file' : 'native-plugin'))
+      : null
+    const ompScope = host.id === 'omp' ? (install.scope ?? 'user') : 'user'
+    if (host.id === 'omp') {
+      const diagnostic = ompDiagnostic(ctx.home, process.cwd())
+      if (!diagnostic.executable) {
+        issues.push({ code: 'omp-executable-missing', level: 'error', host: host.id, message: 'omp' })
+      } else if (!diagnostic.supported) {
+        issues.push({ code: 'omp-version-unsupported', level: 'error', host: host.id, message: diagnostic.version || 'unknown' })
+      }
+      if (ompIntegration === 'native-plugin') {
+        if (ompScope === 'project') {
+          issues.push({ code: 'omp-project-plugin-unsupported', level: 'error', host: host.id, message: 'project scope requires --standard' })
+        } else {
+          const plugin = ompPluginInstalled(ctx.home, ompScope, process.cwd())
+          if (!plugin.ok || !plugin.installed) {
+            issues.push({ code: 'omp-plugin-missing', level: 'error', host: host.id, message: plugin.output || diagnostic.pluginRoot })
+          }
+        }
+      } else {
+        const contextPath = resolveOmpContextPath(ctx.home, ompScope, process.cwd())
+        const status = carrierStatus(contextPath, ctx.version)
+        if (status !== 'ok') issues.push({ code: `omp-context-${status}`, level: 'error', host: host.id, message: contextPath })
+      }
+      continue
+    }
 
     const carrier = host.carrierPath(ctx.home)
     if (carrier) {

@@ -1,7 +1,8 @@
 # HelloAGENTS 一键安装脚本（Windows PowerShell 5.1 及以上）。
 # 环境变量：
-#   HELLOAGENTS_HOSTS     目标宿主，逗号分隔（claude,codex,grok,cursor,hermes,dsh），默认 all
+#   HELLOAGENTS_HOSTS     目标宿主，逗号分隔（claude,codex,grok,cursor,hermes,dsh,omp），默认 all
 #   HELLOAGENTS_METHOD    安装方式：standard 或 global，默认由各宿主自动选择
+#   HELLOAGENTS_SCOPE     OMP scope：user 或 project，默认 user
 #   HELLOAGENTS_VERSION   npm 版本标签，默认 latest（npm 来源时生效）
 #   HELLOAGENTS_SOURCE    安装来源：npm 或 git，默认 npm
 #   HELLOAGENTS_BRANCH    Git 分支（git 来源时生效），默认 main
@@ -13,6 +14,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $version  = if ($env:HELLOAGENTS_VERSION)  { $env:HELLOAGENTS_VERSION }  else { 'latest' }
 $hosts    = if ($env:HELLOAGENTS_HOSTS)    { $env:HELLOAGENTS_HOSTS }    else { 'all' }
 $method   = $env:HELLOAGENTS_METHOD
+$scope    = if ($env:HELLOAGENTS_SCOPE)   { $env:HELLOAGENTS_SCOPE }   else { 'user' }
 $source   = if ($env:HELLOAGENTS_SOURCE)   { $env:HELLOAGENTS_SOURCE }   else { 'npm' }
 $branch   = if ($env:HELLOAGENTS_BRANCH)   { $env:HELLOAGENTS_BRANCH }   else { 'main' }
 $gitUrl   = if ($env:HELLOAGENTS_GIT_URL)  { $env:HELLOAGENTS_GIT_URL }  else { 'https://github.com/hellowind777/helloagents.git' }
@@ -68,6 +70,10 @@ elseif ($method) {
     elseif ($method -eq 'plugin') { $arguments += '--global' }
     else { Write-Error "HELLOAGENTS_METHOD 只接受 standard 或 global，当前值：$method"; exit 1 }
 }
+if ($scope -ne 'user' -and $scope -ne 'project') {
+    Write-Error "HELLOAGENTS_SCOPE 只接受 user 或 project，当前值：$scope"; exit 1
+}
+$arguments += @('--scope', $scope)
 
 helloagents @arguments
 if ($LASTEXITCODE -ne 0) { Write-Error "helloagents install 失败，退出码 $LASTEXITCODE" }

@@ -2,6 +2,11 @@
 
 ## 未发布
 
+- 新增 Oh My Pi（OMP）宿主适配：`helloagents install omp` 默认通过 OMP 原生插件管理器链接唯一运行副本；原生插件支持 user scope，`--standard --scope project` 提供项目级 `.omp/AGENTS.md` 上下文模式，支持更新、卸载与 doctor 检查
+- OMP 标准模式（`--standard`）改为写入受管 `AGENTS.md` 上下文文件，与原生插件模式互斥；缺少 OMP 或版本低于 18.1.0 时安装直接失败，不静默回退
+- OMP 扩展注入完整内核、发现 23 个技能，并兼容 `~plan`、`~hello-plan`、`/hello-plan` 等路由，同时保留 OMP 原生 `/plan`
+- README、帮助文本及一键安装脚本补充 OMP 宿主与 `HELLOAGENTS_SCOPE`
+
 ## 4.0.6-beta.1（2026-09-07）
 
 行为校准与验证：

@@ -4,7 +4,7 @@
 
 # HelloAGENTS
 
-**The thinking activation layer for AI coding CLIs: a course-correction kernel plus 23 on-demand thinking skills, shipped to Claude Code, Codex CLI, Grok Build, Cursor, Hermes, and DeepSeek Harness with one command.**
+**The thinking activation layer for AI coding CLIs: a course-correction kernel plus 23 on-demand thinking skills, shipped to Claude Code, Codex CLI, Grok Build, Cursor, Hermes, DeepSeek Harness, and Oh My Pi with one command.**
 
 [English](./README.md) · [简体中文](./README_CN.md) · [Changelog](./CHANGELOG.md)
 
@@ -29,7 +29,7 @@ HelloAGENTS does three things:
 
 1. **Course-correct**: a kernel lives in the host's rules file and corrects the habits above — organized into explicit sections covering identity, bias-correction patterns, dynamic capability routing, execution discipline, verification habits, interruption recovery, knowledge management, and safety.
 2. **Activate**: 23 thinking skills (planning, implementation, requirements discovery, quality self-check, full-scope review, UI, debugging, security, and more) load on demand, each supplying the judgment framework and quality bar for its scenario — not an approval checklist.
-3. **Distribute**: it reliably installs all of this into six hosts via npm or git clone, across standard mode and global (native marketplace) mode; install, update, health check, uninstall, and migration are each a single command, and uninstalling restores everything in full.
+3. **Distribute**: it reliably installs all of this into seven hosts via npm or git clone, across standard mode and global (native marketplace) mode; install, update, health check, uninstall, and migration are each a single command, and uninstalling restores everything in full.
 
 What it doesn't do: no process management, no state machines, no scripts that evaluate, verify, or audit in the model's place — verification is an activated model habit (run real commands yourself, paste the raw output), not something for scripts to intercept.
 
@@ -46,6 +46,21 @@ npx helloagents@latest install claude codex
 npx helloagents doctor
 ```
 
+To publish to the Nexus npm repository (`npm-repo`):
+
+```bash
+# Log in once; npm stores credentials in your user config, never in this repo.
+npm login --registry=https://nexus.xgblack.cn/repository/npm-repo/
+
+npm run verify
+npm run pack:private       # Inspect the tarball before publishing
+npm run publish:private    # The registry is set in package.json publishConfig
+```
+
+The private registry is `https://nexus.xgblack.cn/repository/npm-repo/`.
+This only affects `npm publish`; normal package installs continue to use the
+default public npm registry.
+
 Once installed, just talk to your host as usual. To jump straight into a specific way of working, use a "~command":
 
 ```
@@ -61,7 +76,7 @@ For teams, the project method is recommended: run `npx helloagents init` at the 
 
 | Command | Description |
 |---|---|
-| `install <host…\|--all> [--standard\|--global]` | Install. Prefers global mode by default, then standard mode |
+| `install <host…\|--all> [--standard\|--global] [--scope user\|project]` | Install. Prefers global mode by default, then standard mode; `--scope` applies to OMP |
 | `uninstall <host…\|--all> [--purge]` | Uninstall and restore host config; `--purge` also deletes `~/.helloagents` |
 | `update [host…]` | Refresh the running copy and sync installed hosts; all if omitted |
 | `init` | Project method: write `./AGENTS.md` and set up the `.helloagents/` knowledge base |
@@ -78,7 +93,7 @@ The three methods can be stacked (hosts generally follow "the nearest rules file
 
 - **Project method**: the kernel goes into the project's `AGENTS.md`, ships via git, keeps the team consistent, and never touches user-global config.
 - **Standard mode** (`--standard`): the kernel goes into the host's user-level rules file (when the host has one), wrapped in `<!-- HELLOAGENTS_START/END -->` markers; content outside the markers is never touched. Hooks and a `~/.{host}/helloagents` symlink are also installed. Uninstalling restores the rules file and removes managed hooks/config.
-- **Global mode** (`--global`): installs through the host's own native plugin marketplace (layered on the standard base), with the host's native management and updates.
+- **Global mode** (`--global`): installs through the host's own native plugin marketplace (layered on the standard base), with the host's native management and updates. OMP is the exception: its native plugin integration is the default and is mutually exclusive with its context-file integration.
 
 | Host | Standard mode | Global mode | guard | notify |
 |---|---|---|---|---|
@@ -88,8 +103,11 @@ The three methods can be stacked (hosts generally follow "the nearest rules file
 | Cursor | hooks + symlink (no user-level rules file) | `~/.cursor/plugins/local/helloagents` (kernel ships as a rule) | Yes | Yes |
 | Hermes | `~/.hermes/AGENTS.md` + symlink | `HERMES_HOME/local-plugins/helloagents` (external_dirs registered) | Yes | Yes |
 | DeepSeek Harness | `~/.dsh/AGENTS.md` + `~/.dsh/skills/` + symlink | dsh bundle (local snapshot + `$DSH_HOME/cordis.patch.yml`, or `dsh plugin add helloagents@beta`) | – | – |
+| Oh My Pi (OMP) | `~/.omp/agent/AGENTS.md`; `--scope project` writes the current project's `.omp/AGENTS.md` | OMP native plugin (`omp plugin link`, user scope only) | – | – |
 
-All six hosts support both standard and global modes. Global mode always layers on the standard base (hooks, symlink, and where applicable the user-level rules carrier); it does not replace it.
+All seven hosts support both standard and global modes. For the six existing hosts, global mode layers on the standard base (hooks, symlink, and where applicable the user-level rules carrier). OMP keeps exactly one integration active: its default/global mode links the package's `omp/index.js` through OMP's native plugin manager, while `--standard` writes only the marked `AGENTS.md` context file.
+
+OMP requires an installed, supported `omp` executable (18.1.0 or newer). `helloagents install omp` fails rather than silently falling back when OMP is missing or too old. Both modes use the single runtime copy at `~/.helloagents/app`; updates refresh that copy and leave OMP pointing at it. OMP native plugins support user scope only; `--standard --scope project` writes `.omp/AGENTS.md` in the current project, while project scope is rejected for native plugin linking.
 
 Cursor has no user-level rules file that HelloAGENTS can inject. `~/.cursor/rules/` is not used as a global carrier — Cursor rule resolution walks upward from the workspace and does not reliably reach the home directory. Standard mode therefore installs only hooks and the `~/.cursor/helloagents` symlink. Global mode also drops a local plugin whose kernel rule is `rules/helloagents-kernel.mdc` with `alwaysApply: true` and deliberately **no** `description` (Cursor currently downgrades rules that carry both to "agent-requested"). The plugin directory holds only what Cursor reads — manifest, skills, rules; the HelloAGENTS CLI itself stays out of it. Run **Developer: Reload Window** in Cursor after a global install.
 
@@ -106,6 +124,15 @@ DeepSeek Harness (`dsh`) reads `$DSH_HOME/AGENTS.md` (defaults to `~/.dsh/AGENTS
 dsh support ships on the `beta` npm channel until it lands in a stable release: `npx helloagents@beta install dsh`. Compatibility is verified against dsh `0.1.0-rc.5` (mainline snapshot `7b9644f`, 2026-08-14); dsh is in developer preview, so re-run `helloagents doctor` after dsh upgrades.
 
 HelloAGENTS is listed in the [`dsh-plugin` topic](https://github.com/topics/dsh-plugin).
+
+## Oh My Pi (OMP)
+
+OMP loads extensions declared by an npm package's `omp.extensions` field. HelloAGENTS exposes `./omp/index.js` there; the extension adds the full kernel through OMP's `before_agent_start` hook, discovers all 23 skills from the linked runtime copy, and rewrites `~plan`, `~hello-plan`, and `/hello-plan` (plus the other skill names) to OMP's `/skill:hello-*` command. OMP's native `/plan` remains untouched.
+
+- **Native plugin (default, or `--global`)**: runs `omp plugin link` at user scope. This is the recommended OMP installation because the extension is loaded by OMP itself and skills stay in the package runtime copy. `--scope project` fails because OMP's link CLI does not support project scope.
+- **Standard context-file (`--standard`)**: writes the kernel to the selected `AGENTS.md` only. `--standard --scope project` is the supported project-level path; it does not register an extension or duplicate skills and is mutually exclusive with the native plugin.
+
+OMP has no HelloAGENTS guard/notify add-on integration yet. `doctor` checks the executable, minimum version, selected plugin/context integration, and scope.
 
 ## Skills at a Glance
 
@@ -146,8 +173,9 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `HELLOAGENTS_HOSTS` | `all` | Target hosts (comma-separated: claude,codex,grok,cursor,hermes,dsh) |
+| `HELLOAGENTS_HOSTS` | `all` | Target hosts (comma-separated: claude,codex,grok,cursor,hermes,dsh,omp) |
 | `HELLOAGENTS_METHOD` | (auto) | Install mode: `standard` or `global` (legacy `inject`/`plugin` also accepted) |
+| `HELLOAGENTS_SCOPE` | `user` | OMP scope: `user` or `project` |
 | `HELLOAGENTS_VERSION` | `latest` | npm dist-tag (npm source only) |
 | `HELLOAGENTS_SOURCE` | `npm` | `npm` or `git` |
 | `HELLOAGENTS_BRANCH` | `main` | Git branch (git source only) |

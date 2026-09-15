@@ -16,6 +16,7 @@ export const APP_ENTRIES = [
   'hooks',
   'assets',
   'dsh',
+  'omp',
   '.claude-plugin',
   '.cursor-plugin',
   '.codex-plugin',

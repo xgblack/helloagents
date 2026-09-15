@@ -3,6 +3,7 @@
  * 安装、卸载、体检、文档中的宿主矩阵都从这里取数。
  */
 import { join } from 'node:path'
+import { resolveOmpAgentDir } from './omp-config.mjs'
 
 /**
  * DeepSeek Harness 宿主目录。$DSH_HOME 环境变量优先；
@@ -17,7 +18,7 @@ export function resolveDshHome(home) {
 }
 
 /**
- * @typedef {'claude' | 'codex' | 'grok' | 'cursor' | 'hermes' | 'dsh'} HostId
+ * @typedef {'claude' | 'codex' | 'grok' | 'cursor' | 'hermes' | 'dsh' | 'omp'} HostId
  *
  * @typedef {Object} HostCapabilities
  * @property {boolean} standard 支持标准模式（用户级载体文件）
@@ -107,6 +108,18 @@ export const HOSTS = [
     capabilities: { standard: true, global: true, guard: false, notify: false },
     // dsh-agent-instructions 原生读取 $DSH_HOME/AGENTS.md
     carrierPath: (home) => join(resolveDshHome(home), 'AGENTS.md'),
+    settingsPath: () => null,
+    cursorHooksPath: () => null,
+    grokHooksPath: () => null,
+    hermesHooksPath: () => null,
+    codexConfigPath: () => null,
+  },
+  {
+    id: 'omp',
+    label: 'Oh My Pi (OMP)',
+    aliases: ['oh-my-pi', 'ohmypi'],
+    capabilities: { standard: true, global: true, guard: false, notify: false },
+    carrierPath: (home) => join(resolveOmpAgentDir(home), 'AGENTS.md'),
     settingsPath: () => null,
     cursorHooksPath: () => null,
     grokHooksPath: () => null,

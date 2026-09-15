@@ -1,8 +1,9 @@
 #!/bin/sh
 # HelloAGENTS 一键安装脚本（macOS / Linux）。
 # 环境变量：
-#   HELLOAGENTS_HOSTS     目标宿主，逗号分隔（claude,codex,grok,cursor,hermes,dsh），默认 all
+#   HELLOAGENTS_HOSTS     目标宿主，逗号分隔（claude,codex,grok,cursor,hermes,dsh,omp），默认 all
 #   HELLOAGENTS_METHOD    安装方式：standard 或 global，默认由各宿主自动选择
+#   HELLOAGENTS_SCOPE     OMP scope：user 或 project，默认 user
 #   HELLOAGENTS_VERSION   npm 版本标签，默认 latest（npm 来源时生效）
 #   HELLOAGENTS_SOURCE    安装来源：npm 或 git，默认 npm
 #   HELLOAGENTS_BRANCH    Git 分支（git 来源时生效），默认 main
@@ -12,6 +13,7 @@ set -eu
 VERSION="${HELLOAGENTS_VERSION:-latest}"
 HOSTS="${HELLOAGENTS_HOSTS:-all}"
 METHOD="${HELLOAGENTS_METHOD:-}"
+SCOPE="${HELLOAGENTS_SCOPE:-user}"
 SOURCE="${HELLOAGENTS_SOURCE:-npm}"
 BRANCH="${HELLOAGENTS_BRANCH:-main}"
 GIT_URL="${HELLOAGENTS_GIT_URL:-https://github.com/hellowind777/helloagents.git}"
@@ -71,6 +73,10 @@ case "$METHOD" in
     echo "HELLOAGENTS_METHOD 只接受 standard 或 global，当前值：$METHOD" >&2
     exit 1
     ;;
+esac
+case "$SCOPE" in
+  user|project) set -- "$@" --scope "$SCOPE" ;;
+  *) echo "HELLOAGENTS_SCOPE 只接受 user 或 project，当前值：$SCOPE" >&2; exit 1 ;;
 esac
 
 helloagents "$@"

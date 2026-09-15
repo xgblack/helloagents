@@ -4,7 +4,7 @@
 
 # HelloAGENTS
 
-**AI 编码 CLI 的思维激活层：一份纠偏内核 + 23 个按需加载的思维技能，一条命令分发到 Claude Code、Codex CLI、Grok Build、Cursor、Hermes、DeepSeek Harness。**
+**AI 编码 CLI 的思维激活层：一份纠偏内核 + 23 个按需加载的思维技能，一条命令分发到 Claude Code、Codex CLI、Grok Build、Cursor、Hermes、DeepSeek Harness、Oh My Pi。**
 
 [English](./README.md) · [简体中文](./README_CN.md) · [更新日志](./CHANGELOG.md)
 
@@ -29,7 +29,7 @@ HelloAGENTS 做三件事：
 
 1. **纠偏**：一份内核常驻宿主规则文件，按明确章节组织——涵盖身份与执行底线、思维纠偏模式、能力调用与动态路由、执行纪律、验证习惯、中断恢复、知识管理、安全底线等。
 2. **激活**：23 个思维技能（方案、实现、需求探索、质量自检、全量审查、界面、调试、安全等）按需读取，提供对应场景下的判断框架与质量标准，不是审批清单。
-3. **分发**：把这套内容可靠地安装进六个宿主，通过 npm 或 git clone 两种来源，覆盖标准模式与全局（原生插件市场）模式；安装、更新、体检、卸载、迁移全部一条命令，卸载即完整还原。
+3. **分发**：把这套内容可靠地安装进七个宿主，通过 npm 或 git clone 两种来源，覆盖标准模式与全局（原生插件市场）模式；安装、更新、体检、卸载、迁移全部一条命令，卸载即完整还原。
 
 它不做什么：不做流程管理，不做状态机，不写脚本替模型评估、验证、审计——验证是激活出来的模型习惯（自己跑真实命令、贴原始输出），不是被脚本拦截的对象。
 
@@ -46,6 +46,20 @@ npx helloagents@latest install claude codex
 npx helloagents doctor
 ```
 
+发布到 Nexus npm 私服（`npm-repo`）：
+
+```bash
+# 首次使用时登录私服，凭据由 npm 写入用户配置，不要提交到仓库
+npm login --registry=https://nexus.xgblack.cn/repository/npm-repo/
+
+npm run verify
+npm run pack:private       # 发布前检查 tarball
+npm run publish:private    # registry 已在 package.json 的 publishConfig 中配置
+```
+
+私服地址为 `https://nexus.xgblack.cn/repository/npm-repo/`。该配置仅影响
+`npm publish`，不会改变从公共 npm registry 安装依赖的默认行为。
+
 安装完成后，像平时一样跟宿主对话即可。想直接进入特定工作方式，用「~命令」：
 
 ```
@@ -61,7 +75,7 @@ npx helloagents doctor
 
 | 命令 | 说明 |
 |---|---|
-| `install <宿主…\|--all> [--standard\|--global]` | 安装（默认优先全局模式，其次标准模式） |
+| `install <宿主…\|--all> [--standard\|--global] [--scope user\|project]` | 安装（默认优先全局模式，其次标准模式；`--scope` 用于 OMP） |
 | `uninstall <宿主…\|--all> [--purge]` | 卸载并还原宿主配置；`--purge` 同时删除 `~/.helloagents` |
 | `update [宿主…]` | 刷新运行副本并同步已安装宿主；不指定则全部刷新 |
 | `init` | 项目方式：写入 `./AGENTS.md` 内核并建立 `.helloagents/` 知识库 |
@@ -78,7 +92,7 @@ npx helloagents doctor
 
 - **项目方式**：内核写入项目的 `AGENTS.md`，随 git 分发，团队保持一致，不碰用户全局配置。
 - **标准模式**（`--standard`）：内核写入宿主的用户级规则文件（若该宿主有），包裹在 `<!-- HELLOAGENTS_START/END -->` 标记内；标记外的用户内容永不改动。同时安装 hooks 与 `~/.{host}/helloagents` 软链接。卸载时还原规则文件并移除受管 hooks/配置。
-- **全局模式**（`--global`）：通过宿主自带的原生插件市场安装（叠加在标准层之上），由宿主原生管理更新。
+- **全局模式**（`--global`）：通过宿主自带的原生插件市场安装（叠加在标准层之上），由宿主原生管理更新。OMP 是例外：原生插件是默认集成方式，与上下文文件模式互斥。
 
 | 宿主 | 标准模式 | 全局模式 | guard | notify |
 |---|---|---|---|---|
@@ -88,8 +102,11 @@ npx helloagents doctor
 | Cursor | hooks + 软链接（无用户级规则文件） | `~/.cursor/plugins/local/helloagents`（内核以规则下发） | 是 | 是 |
 | Hermes | `~/.hermes/AGENTS.md` + 软链接 | `HERMES_HOME/local-plugins/helloagents`（external_dirs 登记） | 是 | 是 |
 | DeepSeek Harness | `~/.dsh/AGENTS.md` + `~/.dsh/skills/` + 软链接 | dsh bundle（本地快照 + `$DSH_HOME/cordis.patch.yml`，或 `dsh plugin add helloagents@beta`） | – | – |
+| Oh My Pi (OMP) | `~/.omp/agent/AGENTS.md`；`--scope project` 写入当前项目的 `.omp/AGENTS.md` | OMP 原生插件（`omp plugin link`，仅 user scope） | – | – |
 
-全部六个宿主均支持标准模式与全局模式。全局模式叠加在标准层之上（hooks、软链接，以及适用时的用户级规则载体），而不是替换标准层。
+全部七个宿主均支持标准模式与全局模式。前六个宿主的全局模式叠加在标准层之上；OMP 同一 scope 只保留一种集成：默认/全局模式链接原生插件，标准模式只写受管 `AGENTS.md` 上下文文件。
+
+OMP 要求系统已安装且版本不低于 18.1.0 的 `omp` 可执行文件。`helloagents install omp` 在找不到 OMP 或版本过低时直接失败，不静默回退。两种模式都使用唯一运行副本 `~/.helloagents/app`；更新只刷新该副本。OMP 原生插件只支持 user scope；`--standard --scope project` 将上下文文件写入当前项目的 `.omp/AGENTS.md`，project scope 不能用于原生插件链接。
 
 Cursor 没有可供 HelloAGENTS 注入的用户级规则文件。`~/.cursor/rules/` 不作为全局载体使用——Cursor 的规则解析从工作区向上遍历，无法可靠到达家目录。因此标准模式只安装 hooks 与 `~/.cursor/helloagents` 软链接；全局模式额外下发本地插件，内核规则为 `rules/helloagents-kernel.mdc`，设置 `alwaysApply: true` 且刻意**不写** `description`（Cursor 目前已知缺陷是二者同时存在时，规则会被降级为「按需取用」）。插件目录只放 Cursor 读取的内容——清单、技能、规则；HelloAGENTS CLI 本身不放入。全局模式安装后在 Cursor 中执行 **Developer: Reload Window** 重载窗口。
 
@@ -106,6 +123,15 @@ DeepSeek Harness（`dsh`）原生读取 `$DSH_HOME/AGENTS.md`（默认 `~/.dsh/A
 dsh 支持目前发布在 npm `beta` 通道（稳定版发布前请使用 `npx helloagents@beta install dsh`）。兼容性已在 dsh `0.1.0-rc.5`（mainline 快照 `7b9644f`，2026-08-14）上验证；dsh 处于开发者预览阶段，升级 dsh 后建议重新执行 `helloagents doctor`。
 
 HelloAGENTS 已收录在 [`dsh-plugin` topic](https://github.com/topics/dsh-plugin)。
+
+## Oh My Pi（OMP）
+
+OMP 通过 npm 包的 `omp.extensions` 字段加载扩展。HelloAGENTS 暴露 `./omp/index.js`：扩展使用 OMP 的 `before_agent_start` 注入完整内核，从运行副本发现 23 个技能，并把 `~plan`、`~hello-plan`、`/hello-plan`（以及其他技能名）转换为 OMP 的 `/skill:hello-*` 命令；OMP 原生 `/plan` 保持不变。
+
+- **原生插件（默认或 `--global`）**：在 user scope 执行 `omp plugin link`。这是 OMP 推荐方式，扩展由 OMP 原生加载，技能仍来自唯一运行副本。`--scope project` 会直接失败，因为 OMP 的 link CLI 不支持 project scope。
+- **标准上下文文件（`--standard`）**：只把内核写入对应的 `AGENTS.md`，不注册扩展、不复制技能；`--standard --scope project` 是项目级正式路径，同一 scope 下与原生插件互斥。
+
+OMP 暂未接入 HelloAGENTS 的 guard/notify 附加组件。`doctor` 会检查 OMP 可执行文件、最低版本、当前集成方式及 scope。
 
 ## 技能一览
 
@@ -146,8 +172,9 @@ curl -fsSL https://raw.githubusercontent.com/hellowind777/helloagents/beta/insta
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `HELLOAGENTS_HOSTS` | `all` | 目标宿主（逗号分隔：claude,codex,grok,cursor,hermes,dsh） |
+| `HELLOAGENTS_HOSTS` | `all` | 目标宿主（逗号分隔：claude,codex,grok,cursor,hermes,dsh,omp） |
 | `HELLOAGENTS_METHOD` | 自动 | 安装方式：`standard` 或 `global`（也接受旧版 `inject`/`plugin`） |
+| `HELLOAGENTS_SCOPE` | `user` | OMP scope：`user` 或 `project` |
 | `HELLOAGENTS_VERSION` | `latest` | npm dist-tag（仅 npm 来源） |
 | `HELLOAGENTS_SOURCE` | `npm` | 来源：`npm` 或 `git` |
 | `HELLOAGENTS_BRANCH` | `main` | Git 分支（仅 git 来源） |
